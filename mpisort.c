@@ -10,14 +10,60 @@ void     merge_sort(int n, double * a);
 void     swap (double * a, double * b);
 void     bubble_sort(int n, double * a);
 
-int MPI_Sort_direct(int n, double * a, int root, MPI_Comm comm);
-int MPI_Sort_bucket(int n, double * a, double max, int root, MPI_Comm comm);
-int MPI_Sort_odd_even(int n, double * array, int root, MPI_Comm comm);
-int MPI_Sort_shell(int n, double * array, int root, MPI_Comm comm);
-int MPI_Sort_bitonic(int n, double * array, int root, MPI_Comm comm, double *tcomm_out, double *tcomp_out);
+int MPI_Sort_direct(int n, double *array, int root, MPI_Comm comm,    
+                    double *out_tcomm, double *out_tcomp);
 
-int MPI_Exchange(int n, double * array, int rank1, int rank2, MPI_Comm comm, double *tcomm_out, double *tcomp_out);
-int MPI_Is_sorted(int n, double *array, int *result, int root, MPI_Comm comm);
+int MPI_Sort_bucket(int n, double *array, int root, MPI_Comm comm,
+                    double max, double *out_tcomm, double *out_tcomp);
+
+int MPI_Sort_odd_even(int n, double *array, int root, MPI_Comm comm,
+                      double *out_tcomm, double *out_tcomp);
+
+int MPI_Sort_shell(int n, double *array, int root, MPI_Comm comm,
+                   double *out_tcomm, double *out_tcomp);
+
+int MPI_Sort_bitonic(int n, double *array, int root, MPI_Comm comm,
+                     double *out_tcomm, double *out_tcomp);
+
+
+int MPI_Exchange(int n, double * array, int rank1, int rank2, MPI_Comm comm,
+                 double *out_tcomm, double *out_tcomp);
+
+int MPI_Is_sorted(int n, double *array, int *result,
+                  int root, MPI_Comm comm);
+
+typedef enum sort_kind_e {
+    SORT_DIRECT,
+    SORT_BUCKET,
+    SORT_ODD_EVEN,
+    SORT_SHELL,
+    SORT_BITONIC,
+    _SORT_COUNT,
+} sort_kind_t;
+
+static inline const char*
+sort_kind_to_str(sort_kind_t kind)
+{
+    switch(kind) {
+        case SORT_DIRECT:   return "DIRECT SORT";
+        case SORT_BUCKET:   return "BUCKET SORT";
+        case SORT_ODD_EVEN: return "ODD_EVEN SORT";
+        case SORT_SHELL:    return "SHELL SORT";
+        case SORT_BITONIC:  return "BITONIC SORT";
+        default:            return "UNKNOWN";
+    }
+}
+
+typedef int (*MPI_Sort_fn)(int n, double *array, int root, MPI_Comm comm,
+                           double *out_tcomm, double *out_tcomp);
+
+const MPI_Sort_fn MPI_Sort_funcs[_SORT_COUNT] = {
+    MPI_Sort_direct,
+    //MPI_Sort_bucket,
+    MPI_Sort_odd_even,
+    MPI_Sort_shell,
+    MPI_Sort_bitonic,
+};
 
 static inline void
 logv(const char *str, ...)
@@ -66,7 +112,19 @@ int main(int argc, char *argv[])
 	double m = 10.0;
 	double * scattered_array, * array;
 
-	// Init + rank + size
+    if (argc < 2) {
+        LOG("not enough arguments");
+        return 1;
+    }
+
+    int argv_int = atoi(argv[1]);
+    if (argv_int < 0 || argv_int >= _SORT_COUNT) {
+        LOG("sort kind out of bounds");
+        return 1;
+    }
+
+    sort_kind_t sort_kind = (sort_kind_t)argv_int;
+
 	MPI_Init(&argc, &argv);
    	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
    	MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -74,131 +132,38 @@ int main(int argc, char *argv[])
     array = (double *) calloc(n, sizeof(double));
 	if(rank == 0)
 	{
-
-	   //initialise the array with random values, then scatter to all processors
 	   srand(((unsigned)time(NULL)+rank));
 
-	   for(i = 0; i < n; i++)
-	   {
+	   for(i = 0; i < n; i++) {
 	      array[i]=((double)rand()/RAND_MAX)*m;
 	   }
 
 	}
 
-    // call and time evaluate MPI_Sort_direct
     double tcomm, tcomp;
-    // MPI_Sort_odd_even(n, array, 0, MPI_COMM_WORLD);
-    // ret = MPI_Sort_shell(n, array, 0, MPI_COMM_WORLD);
-    ret = MPI_Sort_bitonic(n, array, 0, MPI_COMM_WORLD, &tcomm, &tcomp);
+    // ret = MPI_Sort_direct(n, array, 0, MPI_COMM_WORLD, &tcomm, &tcomp);
+    // ret = MPI_Sort_odd_even(n, array, 0, MPI_COMM_WORLD, &tcomm, &tcomp);
+    // ret = MPI_Sort_bitonic(n, array, 0, MPI_COMM_WORLD, &tcomm, &tcomp);
+
+    if (rank == 0) LOG("%s", sort_kind_to_str(sort_kind));
+    ret = MPI_Sort_funcs[sort_kind](n, array, 0, MPI_COMM_WORLD, &tcomm, &tcomp); 
 
     if (ret != MPI_SUCCESS) {
         LOG("MPI failure: %d", ret);
         goto final;
     }
     
-    LOG("Proc %d: Comm Time: %lf Comp Time: %lf", rank, tcomm, tcomp);
+    if (rank == 0) {
+        LOG("Comm Time: %lf Comp Time: %lf Total: %lf",
+            rank, tcomm, tcomp, tcomm + tcomp);
+    }
 
 final:
 	MPI_Finalize();
 }
 
-// MPI Functions
-
-int MPI_Sort_direct(int n, double * array, int root, MPI_Comm comm)
-{
-    int rank, size;
-    MPI_Comm_rank(comm, &rank);
-    MPI_Comm_size(comm, &size);
-    
-    double * localArray = (double *)calloc(n/size, sizeof(double));
-    
-    // scatter array to localArray with double elements
-    int rc = MPI_Scatter(array, n/size, MPI_DOUBLE, localArray, n/size, MPI_DOUBLE, root, comm);
-    if(rc != MPI_SUCCESS)return rc;
-
-    // sequential sort localArray
-    bubble_sort(n/size, localArray);
-
-    // gather localArray to array with double elements
-    rc = MPI_Gather(localArray, n/size, MPI_DOUBLE, array, n/size, MPI_DOUBLE, root, comm);
-    if(rc != MPI_SUCCESS)return rc;
-
-    if(rank == 0) {
-        // merge the size chunks of array
-        for(int i=1;i<size;i++) {
-            double * tmpArray = merge_array(n/size*i, array, n/size, array+n/size*i);
-            for(int j=0;j<(i+1)*n/size;j++)array[j] = tmpArray[j];
-        }
-    }
-    
-    return MPI_SUCCESS;
-}
-
-int MPI_Sort_bucket(int n, double * a, double max, int root, MPI_Comm comm)
-{
-    int     rank, size;
-    double *bucket;
-    int     bucket_count;
-    int    *recv_counts, *displacements;
-    int     ret = MPI_SUCCESS;
-
-    MPI_Comm_rank(comm, &rank);
-    MPI_Comm_size(comm, &size);
-
-    bucket_count  = 0;
-    bucket        = (double *)calloc(n, sizeof(*bucket));
-    recv_counts   = (int *)calloc(size, sizeof(*recv_counts));
-    displacements = (int *)calloc(size, sizeof(*displacements));
-
-    if (!bucket || !recv_counts || !displacements) {
-        ret = MPI_T_ERR_MEMORY;
-        goto out;
-    }
-
-    /* bcast a */
-    ret = MPI_Bcast(a, n, MPI_DOUBLE, root, comm);
-    if (ret != MPI_SUCCESS) goto out;
-
-    /* 
-     * collect as elems to proc ranks bucket
-     * since we don;t know how big the bucket could be we init to n
-     */
-    for (int i = 0; i < n; i++) {
-        /* check if a[i] is in the bucket [max/size*rank, max/size*(rank+1)] */
-        if (a[i] >= max/size+rank && a[i] < max/size*(rank+1)) {
-            bucket[bucket_count++] = a[i];
-        }
-    }
-
-    /* sort bucket */
-    merge_sort(bucket_count, bucket);
-
-    /* gatherv */
-    ret = MPI_Gather(&bucket_count, 1, MPI_INT, recv_counts, 1, MPI_INT, root, comm);
-    if (ret != MPI_SUCCESS) goto out;
-
-    if (rank == root) {
-        displacements[0] = 0;
-        for (int i = 1; i < size; i++) {
-            displacements[i] = displacements[i - 1] + recv_counts[i - 1];
-        }
-    }
-
-    ret = MPI_Gatherv(bucket, bucket_count, MPI_DOUBLE,
-                      a, recv_counts, displacements, MPI_DOUBLE,
-                      root, comm);
-
-    if (ret != MPI_SUCCESS) goto out;
-
-out:
-    if (bucket) free(bucket);
-    return ret;
-}
-
-
-// function to merge the array a with n elements with the array b with m elements
-// function returns the nerged array
-double * merge_array(int n, double * a, int m, double * b)
+double*
+merge_array(int n, double * a, int m, double * b)
 {
    int i,j,k;
    double * c = (double *) calloc(n+m, sizeof(double));
@@ -210,12 +175,13 @@ double * merge_array(int n, double * a, int m, double * b)
    if(i==n)for(;j<m;)c[k++]=b[j++];
    else for(;i<n;)c[k++]=a[i++];
 
-return c;
+    return c;
 }
 
 // function to merge sort the array a with n elements
 
-void merge_sort(int n, double * a)
+void
+merge_sort(int n, double * a)
 {
    double * c;
    int i;
@@ -234,7 +200,8 @@ void merge_sort(int n, double * a)
     return;
 }
 
-void bubble_sort(int n, double * a)
+void
+bubble_sort(int n, double * a)
 {
     for(int i=0;i<n-1;i++) {
         for(int j=0;j<n-1;j++) {
@@ -244,22 +211,186 @@ void bubble_sort(int n, double * a)
 }
 
 // swap two doubles
-void swap (double * a, double * b)
+void
+swap (double * a, double * b)
 {
    double temp;
 
    temp=*a;*a=*b;*b=temp;
 }
 
+int
+MPI_Sort_direct(int n,
+                double *array,
+                int root,
+                MPI_Comm comm,
+                double *out_tcomm,
+                double *out_tcomp)
+{
+    int rank, size;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &size);
+    int ret = MPI_SUCCESS;
+    double tcomm = 0.0f;
+    double tcomp = 0.0f;
+    double time  = 0.0f;
+    double overall_tcomm, overall_tcomp;
+    
+    double *local_array = (double *)calloc(n/size, sizeof(double));
+    if (!local_array) goto out;
+    
+    // scatter array to local_array with double elements
+    time = MPI_Wtime();
+    ret = MPI_Scatter(array, n/size, MPI_DOUBLE, local_array, n/size, MPI_DOUBLE, root, comm);
+    time = MPI_Wtime() - time;
+    tcomm += time;
+    if (ret != MPI_SUCCESS) goto out;
 
-int MPI_Sort_odd_even(int n, double * array, int root, MPI_Comm comm)
+    // sequential sort local_array
+    time = MPI_Wtime();
+    bubble_sort(n/size, local_array);
+    time = MPI_Wtime() - time;
+    tcomp += time;
+
+    // gather local_array to array with double elements
+    time = MPI_Wtime();
+    ret = MPI_Gather(local_array, n/size, MPI_DOUBLE, array, n/size, MPI_DOUBLE, root, comm);
+    time = MPI_Wtime() - time;
+    tcomm += time;
+    if (ret != MPI_SUCCESS) goto out;
+
+    if(rank == 0) {
+        time = MPI_Wtime();
+        // merge the size chunks of array
+        for(int i=1;i<size;i++) {
+            double *tmp_array = merge_array(n/size*i, array, n/size, array+n/size*i);
+            for(int j=0;j<(i+1)*n/size;j++)array[j] = tmp_array[j];
+        }
+        time = MPI_Wtime() - time;
+        tcomp += time;
+    }
+
+    ret = MPI_Reduce(&tcomm, &overall_tcomm, 1, MPI_DOUBLE, MPI_MAX, root, comm);
+    if (ret != MPI_SUCCESS) goto out;
+
+    ret = MPI_Reduce(&tcomp, &overall_tcomp, 1, MPI_DOUBLE, MPI_MAX, root, comm);
+    if (ret != MPI_SUCCESS) goto out;
+    
+    *out_tcomm = overall_tcomm;
+    *out_tcomp = overall_tcomp;
+
+out:
+    if (local_array) free(local_array);
+    return ret;
+}
+
+int
+MPI_Sort_bucket(int n,
+                double *array,
+                int root,
+                MPI_Comm comm,
+                double max,
+                double *out_tcomm,
+                double *out_tcomp)
+{
+    int     rank, size;
+    double *bucket;
+    int     bucket_count;
+    int    *recv_counts, *displacements;
+    int     ret = MPI_SUCCESS;
+    double  tcomm = 0.0f;
+    double  tcomp = 0.0f;
+    double  time;
+    double  overall_tcomm, overall_tcomp;
+    
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &size);
+
+    bucket_count  = 0;
+    bucket        = (double *)calloc(n, sizeof(*bucket));
+    recv_counts   = (int *)calloc(size, sizeof(*recv_counts));
+    displacements = (int *)calloc(size, sizeof(*displacements));
+
+    if (!bucket || !recv_counts || !displacements) {
+        ret = MPI_T_ERR_MEMORY;
+        goto out;
+    }
+
+    /* bcast a */
+    time = MPI_Wtime();
+    ret = MPI_Bcast(array, n, MPI_DOUBLE, root, comm);
+    time = MPI_Wtime() - time;
+    tcomm += time;
+    if (ret != MPI_SUCCESS) goto out;
+
+    /* 
+     * collect as elems to proc ranks bucket
+     * since we don;t know how big the bucket could be we init to n
+     */
+    time = MPI_Wtime();
+    for (int i = 0; i < n; i++) {
+        /* check if a[i] is in the bucket [max/size*rank, max/size*(rank+1)] */
+        if (array[i] >= max/size+rank && array[i] < max/size*(rank+1)) {
+            bucket[bucket_count++] = array[i];
+        }
+    }
+    merge_sort(bucket_count, bucket);
+    time = MPI_Wtime() - time;
+    tcomp += time;
+
+    /* gatherv */
+    time = MPI_Wtime();
+    ret = MPI_Gather(&bucket_count, 1, MPI_INT, recv_counts, 1, MPI_INT, root, comm);
+    time = MPI_Wtime() - time;
+    tcomm += time;
+    if (ret != MPI_SUCCESS) goto out;
+
+    time = MPI_Wtime();
+    if (rank == root) {
+        displacements[0] = 0;
+        for (int i = 1; i < size; i++) {
+            displacements[i] = displacements[i - 1] + recv_counts[i - 1];
+        }
+    }
+    time = MPI_Wtime() - time;
+    tcomp += time;
+
+    time = MPI_Wtime();
+    ret = MPI_Gatherv(bucket, bucket_count, MPI_DOUBLE,
+                      array, recv_counts, displacements, MPI_DOUBLE,
+                      root, comm);
+    time = MPI_Wtime() - time;
+    tcomm += time;
+    if (ret != MPI_SUCCESS) goto out;
+
+    ret = MPI_Reduce(&tcomm, &overall_tcomm, 1, MPI_DOUBLE, MPI_MAX, root, comm);
+    if (ret != MPI_SUCCESS) goto out;
+
+    ret = MPI_Reduce(&tcomp, &overall_tcomp, 1, MPI_DOUBLE, MPI_MAX, root, comm);
+    if (ret != MPI_SUCCESS) goto out;
+
+    *out_tcomm = overall_tcomm;
+    *out_tcomp = overall_tcomp;
+
+out:
+    if (bucket) free(bucket);
+    return ret;
+}
+
+int
+MPI_Sort_odd_even(int n,
+                  double *array,
+                  int root,
+                  MPI_Comm comm,
+                  double *out_tcomm,
+                  double *out_tcomp)
 {
     int rank, size;
     int ret = MPI_SUCCESS;
-    double overall_tcomm, overall_tcomp;
     double tcomm = 0.0f;
     double tcomp = 0.0f;
     double time;
+    double overall_tcomm, overall_tcomp;
     
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
@@ -270,10 +401,16 @@ int MPI_Sort_odd_even(int n, double * array, int root, MPI_Comm comm)
         goto out;
     }
   
+    time = MPI_Wtime();
     ret = MPI_Scatter(array, n/size, MPI_DOUBLE, local_arr, n/size, MPI_DOUBLE, root, comm);
+    time = MPI_Wtime() - time;
+    tcomm += time;
     if (ret != MPI_SUCCESS) goto out;
 
+    time = MPI_Wtime();
     merge_sort(n/size, local_arr);
+    time = MPI_Wtime() - time;
+    tcomp += time;
 
     for (int step = 0; step < size; step++) {
         if ((step + rank) % 2 == 0) {
@@ -286,24 +423,46 @@ int MPI_Sort_odd_even(int n, double * array, int root, MPI_Comm comm)
         MPI_Barrier(comm);
 
         int is_sorted;
+        time = MPI_Wtime();
         ret = MPI_Is_sorted(n/size, local_arr, &is_sorted, root, comm);
+        time = MPI_Wtime() - time;
+        tcomm += time;
         if (ret != MPI_SUCCESS) goto out;
 
         if (is_sorted) {
-            LOG("number of steps: %d", step);
+            //LOG("number of steps: %d", step);
             break;
         }
     }
+    
+    time = MPI_Wtime();
     ret = MPI_Gather(local_arr, n/size, MPI_DOUBLE, array, n/size, MPI_DOUBLE, root, comm);
+    time = MPI_Wtime() - time;
+    tcomm += time;
     if (ret != MPI_SUCCESS) goto out;
     
+    ret = MPI_Reduce(&tcomm, &overall_tcomm, 1, MPI_DOUBLE, MPI_MAX, root, comm);
+    if (ret != MPI_SUCCESS) goto out;
+
+    ret = MPI_Reduce(&tcomp, &overall_tcomp, 1, MPI_DOUBLE, MPI_MAX, root, comm);
+    if (ret != MPI_SUCCESS) goto out;
+
+    *out_tcomm = overall_tcomm;
+    *out_tcomp = overall_tcomp;
+
 out:
     if (local_arr) free(local_arr);
 
     return ret;
 }
  
-int MPI_Sort_shell(int n, double *array, int root, MPI_Comm comm)
+int
+MPI_Sort_shell(int n,
+               double *array,
+               int root,
+               MPI_Comm comm,
+               double *out_tcomm,
+               double *out_tcomp)
 {
     int rank, size;
     int ret = MPI_SUCCESS;
@@ -321,10 +480,16 @@ int MPI_Sort_shell(int n, double *array, int root, MPI_Comm comm)
         goto out;
     }
   
+    time = MPI_Wtime();
     ret = MPI_Scatter(array, n/size, MPI_DOUBLE, local_arr, n/size, MPI_DOUBLE, root, comm);
+    time = MPI_Wtime() - time;
+    tcomm += time;
     if (ret != MPI_SUCCESS) goto out;
 
+    time = MPI_Wtime();
     merge_sort(n/size, local_arr);
+    time = MPI_Wtime() - time;
+    tcomm += time;
 
     //shell
     int left = 0, right = size-1;
@@ -346,7 +511,10 @@ int MPI_Sort_shell(int n, double *array, int root, MPI_Comm comm)
     }
 
     int is_sorted;
+    time = MPI_Wtime();
     ret = MPI_Is_sorted(n/size, local_arr, &is_sorted, root, comm);
+    time = MPI_Wtime() - time;
+    tcomm += time;
     if (ret != MPI_SUCCESS) goto out;
 
     if (is_sorted) {
@@ -365,7 +533,10 @@ int MPI_Sort_shell(int n, double *array, int root, MPI_Comm comm)
         }
         MPI_Barrier(comm);
 
+        time = MPI_Wtime();
         ret = MPI_Is_sorted(n/size, local_arr, &is_sorted, root, comm);
+        time = MPI_Wtime() - time;
+        tcomm += time;
         if (ret != MPI_SUCCESS) goto out;
 
         if (is_sorted) {
@@ -378,6 +549,15 @@ gather:
     ret = MPI_Gather(local_arr, n/size, MPI_DOUBLE, array, n/size, MPI_DOUBLE, root, comm);
     if (ret != MPI_SUCCESS) goto out;
     
+    ret = MPI_Reduce(&tcomm, &overall_tcomm, 1, MPI_DOUBLE, MPI_MAX, root, comm);
+    if (ret != MPI_SUCCESS) goto out;
+
+    ret = MPI_Reduce(&tcomp, &overall_tcomp, 1, MPI_DOUBLE, MPI_MAX, root, comm);
+    if (ret != MPI_SUCCESS) goto out;
+
+    *out_tcomm = overall_tcomm;
+    *out_tcomp = overall_tcomp;
+
 out:
     if (local_arr) free(local_arr);
 
@@ -402,15 +582,16 @@ get_dim(int x)
 #define DIR_ASC  0
 #define DIR_DESC 1
 
-int MPI_Sort_bitonic(int n,
-                     double  *array,
-                     int      root,
-                     MPI_Comm comm,
-                     double  *tcomm_out,
-                     double  *tcomp_out)
+int
+MPI_Sort_bitonic(int n,
+                 double  *array,
+                 int      root,
+                 MPI_Comm comm,
+                 double  *out_tcomm,
+                 double  *out_tcomp)
 {
-    int    rank, size;
-    int    ret = MPI_SUCCESS;
+    int rank, size;
+    int ret = MPI_SUCCESS;
     double overall_tcomm, overall_tcomp;
     double tcomm = 0.0f;
     double tcomp = 0.0f;
@@ -485,8 +666,8 @@ int MPI_Sort_bitonic(int n,
     ret = MPI_Reduce(&tcomp, &overall_tcomp, 1, MPI_DOUBLE, MPI_MAX, root, comm);
     if (ret != MPI_SUCCESS) goto out;
 
-    *tcomm_out = tcomm;
-    *tcomp_out = tcomp;
+    *out_tcomm = overall_tcomm;
+    *out_tcomp = overall_tcomp;
 
     DEBUG_RANK(rank, "end!");
 
@@ -539,8 +720,8 @@ int MPI_Exchange(int      n,
                  int      rank1,
                  int      rank2,
                  MPI_Comm comm,
-                 double  *tcomm_out,
-                 double  *tcomp_out)
+                 double  *out_tcomm,
+                 double  *out_tcomp)
 {
     int rank, size, i, tag1 = 0, tag2 = 1;
     int ret = MPI_SUCCESS;
@@ -605,8 +786,8 @@ int MPI_Exchange(int      n,
      * assumes that tcomm and tcomp passed in are being actively used, so we
      * just accumulate here rather than overwrite.
      */
-    *tcomm_out += tcomm;
-    *tcomp_out += tcomp;
+    *out_tcomm += tcomm;
+    *out_tcomp += tcomp;
 
 out:
     if (ret != MPI_SUCCESS) LOG("Exchange error");
