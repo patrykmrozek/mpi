@@ -14,7 +14,7 @@ int MPI_Sort_direct(int n, double *array, int root, MPI_Comm comm,
                     double *out_tcomm, double *out_tcomp);
 
 int MPI_Sort_bucket(int n, double *array, int root, MPI_Comm comm,
-                    double max, double *out_tcomm, double *out_tcomp);
+                    double *out_tcomm, double *out_tcomp);
 
 int MPI_Sort_odd_even(int n, double *array, int root, MPI_Comm comm,
                       double *out_tcomm, double *out_tcomp);
@@ -59,7 +59,7 @@ typedef int (*MPI_Sort_fn)(int n, double *array, int root, MPI_Comm comm,
 
 const MPI_Sort_fn MPI_Sort_funcs[_SORT_COUNT] = {
     MPI_Sort_direct,
-    //MPI_Sort_bucket,
+    MPI_Sort_bucket,
     MPI_Sort_odd_even,
     MPI_Sort_shell,
     MPI_Sort_bitonic,
@@ -119,8 +119,9 @@ int main(int argc, char *argv[])
 
     int argv_int = atoi(argv[1]);
     if (argv_int < 0 || argv_int >= _SORT_COUNT) {
-        LOG("sort kind out of bounds");
-        return 1;
+        LOG("sort kind out of bounds: %d", argv_int);
+        LOG("setting sort: %s", sort_kind_to_str(_SORT_COUNT-1));
+        argv_int = _SORT_COUNT-1;
     }
 
     sort_kind_t sort_kind = (sort_kind_t)argv_int;
@@ -141,11 +142,7 @@ int main(int argc, char *argv[])
 	}
 
     double tcomm, tcomp;
-    // ret = MPI_Sort_direct(n, array, 0, MPI_COMM_WORLD, &tcomm, &tcomp);
-    // ret = MPI_Sort_odd_even(n, array, 0, MPI_COMM_WORLD, &tcomm, &tcomp);
-    // ret = MPI_Sort_bitonic(n, array, 0, MPI_COMM_WORLD, &tcomm, &tcomp);
 
-    if (rank == 0) LOG("%s", sort_kind_to_str(sort_kind));
     ret = MPI_Sort_funcs[sort_kind](n, array, 0, MPI_COMM_WORLD, &tcomm, &tcomp); 
 
     if (ret != MPI_SUCCESS) {
@@ -154,6 +151,7 @@ int main(int argc, char *argv[])
     }
     
     if (rank == 0) {
+        LOG("\n%s", sort_kind_to_str(sort_kind));
         LOG("Comm Time: %lf Comp Time: %lf Total: %lf",
             rank, tcomm, tcomp, tcomm + tcomp);
     }
@@ -284,12 +282,15 @@ out:
     return ret;
 }
 
+#ifndef MPI_SORT_BUCKET_MAX
+    #define MPI_SORT_BUCKET_MAX 5
+#endif //MPI_SORT_BUCKET_MAX
+
 int
 MPI_Sort_bucket(int n,
                 double *array,
                 int root,
                 MPI_Comm comm,
-                double max,
                 double *out_tcomm,
                 double *out_tcomp)
 {
@@ -330,7 +331,7 @@ MPI_Sort_bucket(int n,
     time = MPI_Wtime();
     for (int i = 0; i < n; i++) {
         /* check if a[i] is in the bucket [max/size*rank, max/size*(rank+1)] */
-        if (array[i] >= max/size+rank && array[i] < max/size*(rank+1)) {
+        if (array[i] >= MPI_SORT_BUCKET_MAX/size+rank && array[i] < MPI_SORT_BUCKET_MAX/size*(rank+1)) {
             bucket[bucket_count++] = array[i];
         }
     }
@@ -540,7 +541,7 @@ MPI_Sort_shell(int n,
         if (ret != MPI_SUCCESS) goto out;
 
         if (is_sorted) {
-            LOG("number of steps: %d", step);
+            // LOG("number of steps: %d", step);
             break;
         }
     }
