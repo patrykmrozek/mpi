@@ -225,21 +225,18 @@ MPI_Sort_direct(int n,
     // scatter array to local_array with double elements
     time = MPI_Wtime();
     ret = MPI_Scatter(array, n/size, MPI_DOUBLE, local_array, n/size, MPI_DOUBLE, root, comm);
-    time = MPI_Wtime() - time;
-    tcomm += time;
+    tcomm += MPI_Wtime() - time;
     if (ret != MPI_SUCCESS) goto out;
 
     // sequential sort local_array
     time = MPI_Wtime();
     merge_sort(n/size, local_array);
-    time = MPI_Wtime() - time;
-    tcomp += time;
+    tcomp += MPI_Wtime() - time;
 
     // gather local_array to array with double elements
     time = MPI_Wtime();
     ret = MPI_Gather(local_array, n/size, MPI_DOUBLE, array, n/size, MPI_DOUBLE, root, comm);
-    time = MPI_Wtime() - time;
-    tcomm += time;
+    tcomm += MPI_Wtime() - time;
     if (ret != MPI_SUCCESS) goto out;
 
     if(rank == root) {
@@ -250,8 +247,7 @@ MPI_Sort_direct(int n,
             for(int j=0;j<(i+1)*n/size;j++)array[j] = tmp_array[j];
             free(tmp_array);
         }
-        time = MPI_Wtime() - time;
-        tcomp += time;
+        tcomp += MPI_Wtime() - time;
     }
 
     ret = MPI_Reduce(&tcomm, &overall_tcomm, 1, MPI_DOUBLE, MPI_MAX, root, comm);
@@ -304,8 +300,7 @@ MPI_Sort_bucket(int n,
     /* bcast a */
     time = MPI_Wtime();
     ret = MPI_Bcast(array, n, MPI_DOUBLE, root, comm);
-    time = MPI_Wtime() - time;
-    tcomm += time;
+    tcomm += MPI_Wtime() - time;
     if (ret != MPI_SUCCESS) goto out;
 
     /* 
@@ -323,14 +318,12 @@ MPI_Sort_bucket(int n,
         }
     }
     merge_sort(bucket_count, bucket);
-    time = MPI_Wtime() - time;
-    tcomp += time;
+    tcomp += MPI_Wtime() - time;
 
     /* gatherv */
     time = MPI_Wtime();
     ret = MPI_Gather(&bucket_count, 1, MPI_INT, recv_counts, 1, MPI_INT, root, comm);
-    time = MPI_Wtime() - time;
-    tcomm += time;
+    tcomm += MPI_Wtime() - time;
     if (ret != MPI_SUCCESS) goto out;
 
     time = MPI_Wtime();
@@ -340,15 +333,13 @@ MPI_Sort_bucket(int n,
             displacements[i] = displacements[i - 1] + recv_counts[i - 1];
         }
     }
-    time = MPI_Wtime() - time;
-    tcomp += time;
+    tcomp += MPI_Wtime() - time;
 
     time = MPI_Wtime();
     ret = MPI_Gatherv(bucket, bucket_count, MPI_DOUBLE,
                       array, recv_counts, displacements, MPI_DOUBLE,
                       root, comm);
-    time = MPI_Wtime() - time;
-    tcomm += time;
+    tcomm += MPI_Wtime() - time;
     if (ret != MPI_SUCCESS) goto out;
 
     ret = MPI_Reduce(&tcomm, &overall_tcomm, 1, MPI_DOUBLE, MPI_MAX, root, comm);
@@ -393,14 +384,12 @@ MPI_Sort_odd_even(int n,
 
     time = MPI_Wtime();
     ret = MPI_Scatter(array, n/size, MPI_DOUBLE, local_arr, n/size, MPI_DOUBLE, root, comm);
-    time = MPI_Wtime() - time;
-    tcomm += time;
+    tcomm += MPI_Wtime() - time;
     if (ret != MPI_SUCCESS) goto out;
 
     time = MPI_Wtime();
     merge_sort(n/size, local_arr);
-    time = MPI_Wtime() - time;
-    tcomp += time;
+    tcomp += MPI_Wtime() - time;
 
     for (int step = 0; step < size; step++) {
         if ((step + rank) % 2 == 0) {
@@ -419,8 +408,7 @@ MPI_Sort_odd_even(int n,
         int is_sorted;
         time = MPI_Wtime();
         ret = MPI_Is_sorted(n/size, local_arr, &is_sorted, root, comm);
-        time = MPI_Wtime() - time;
-        tcomm += time;
+        tcomm += MPI_Wtime() - time;
         if (ret != MPI_SUCCESS) goto out;
 
         if (is_sorted) {
@@ -431,8 +419,7 @@ MPI_Sort_odd_even(int n,
     
     time = MPI_Wtime();
     ret = MPI_Gather(local_arr, n/size, MPI_DOUBLE, array, n/size, MPI_DOUBLE, root, comm);
-    time = MPI_Wtime() - time;
-    tcomm += time;
+    tcomm += MPI_Wtime() - time;
     if (ret != MPI_SUCCESS) goto out;
     
     ret = MPI_Reduce(&tcomm, &overall_tcomm, 1, MPI_DOUBLE, MPI_MAX, root, comm);
@@ -610,8 +597,8 @@ MPI_Sort_bitonic(int n,
 
     time = MPI_Wtime();
     ret = MPI_Scatter(array, n/size, MPI_DOUBLE, local_arr, n/size, MPI_DOUBLE, root, comm);
-    if (ret != MPI_SUCCESS) goto out;
     tcomm += (MPI_Wtime() - time);
+    if (ret != MPI_SUCCESS) goto out;
 
     time = MPI_Wtime();
     merge_sort(n/size, local_arr);
