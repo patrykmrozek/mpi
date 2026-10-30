@@ -98,10 +98,10 @@ logv(const char *str, ...)
 
 int main(int argc, char *argv[])
 {
-	int rank, size;
+    int rank, size;
     int ret = MPI_SUCCESS;
-	int n = 10000000;
-	double*array;
+    int n = 10000000;
+    double*array;
     double tcomm, tcomp;
     double overall_time;
 
@@ -110,9 +110,9 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-	MPI_Init(&argc, &argv);
-   	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-   	MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
 
     int argvi = atoi(argv[1]);
     if (argvi < 0 || argvi >= _SORT_COUNT) {
@@ -127,12 +127,12 @@ int main(int argc, char *argv[])
     array = (double *) calloc(n, sizeof(double));
     if (!array) goto out;
 
-	if (rank == 0) {
-	   srand(((unsigned)time(NULL)+rank));
-	   for (int i = 0; i < n; i++) {
-	      array[i]=((double)rand()/RAND_MAX) * RAND_LIMIT;
-	   }
-	}
+    if (rank == 0) {
+        srand(((unsigned)time(NULL)+rank));
+        for (int i = 0; i < n; i++) {
+            array[i]=((double)rand()/RAND_MAX) * RAND_LIMIT;
+        }
+    }
 
     overall_time = MPI_Wtime();
     ret = MPI_Sort_funcs[sort_kind](n, array, 0, MPI_COMM_WORLD, &tcomm, &tcomp); 
@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
 out:
     if (ret != MPI_SUCCESS) LOG("MPI failure: %d", ret);
     if (array) free(array);
-	MPI_Finalize();
+    MPI_Finalize();
 }
 
 double*
@@ -390,7 +390,7 @@ MPI_Sort_odd_even(int n,
         ret = MPI_ERR_NO_MEM;
         goto out;
     }
-  
+
     time = MPI_Wtime();
     ret = MPI_Scatter(array, n/size, MPI_DOUBLE, local_arr, n/size, MPI_DOUBLE, root, comm);
     time = MPI_Wtime() - time;
@@ -424,7 +424,7 @@ MPI_Sort_odd_even(int n,
         if (ret != MPI_SUCCESS) goto out;
 
         if (is_sorted) {
-            //LOG("number of steps: %d", step);
+            DEBUG("number of steps: %d", step);
             break;
         }
     }
@@ -449,7 +449,7 @@ out:
 
     return ret;
 }
- 
+
 int
 MPI_Sort_shell(int n,
                double *array,
@@ -473,7 +473,7 @@ MPI_Sort_shell(int n,
         ret = MPI_ERR_NO_MEM;
         goto out;
     }
-  
+
     time = MPI_Wtime();
     ret = MPI_Scatter(array, n/size, MPI_DOUBLE, local_arr, n/size, MPI_DOUBLE, root, comm);
     tcomm += MPI_Wtime() - time;
@@ -509,7 +509,7 @@ MPI_Sort_shell(int n,
     if (ret != MPI_SUCCESS) goto out;
 
     if (is_sorted) {
-        // LOG("sorted by shell");
+        DEBUG("sorted by shell");
         goto gather;
     }
 
@@ -530,7 +530,7 @@ MPI_Sort_shell(int n,
         if (ret != MPI_SUCCESS) goto out;
 
         if (is_sorted) {
-            // LOG("number of steps: %d", step);
+            DEBUG("number of steps: %d", step);
             break;
         }
     }
@@ -589,7 +589,7 @@ MPI_Sort_bitonic(int n,
     double tcomm = 0.0f;
     double tcomp = 0.0f;
     double time = 0.0f;
-    
+
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
@@ -607,7 +607,7 @@ MPI_Sort_bitonic(int n,
         ret = MPI_ERR_NO_MEM;
         goto out;
     }
-  
+
     time = MPI_Wtime();
     ret = MPI_Scatter(array, n/size, MPI_DOUBLE, local_arr, n/size, MPI_DOUBLE, root, comm);
     if (ret != MPI_SUCCESS) goto out;
@@ -725,13 +725,13 @@ int MPI_Exchange(int      n,
     double tcomm = 0.0f;
     double tcomp = 0.0f;
     double time  = 0.0f;
-    
+
     double * b = (double *) calloc(n, sizeof(double));
     if (!b) {
         ret = MPI_ERR_NO_MEM;
         goto out;
     }
-   
+
     MPI_Status status;
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
