@@ -5,32 +5,22 @@
 #include <time.h>
 #include "mpi.h"
 
-double * merge_array(int n, double * a, int m, double * b);
-void     merge_sort(int n, double * a);
-void     swap (double * a, double * b);
-void     bubble_sort(int n, double * a);
+/* sort util */
+double *merge_array(int n, double * a, int m, double * b);
+void    merge_sort(int n, double * a);
+void    swap (double * a, double * b);
 
-int MPI_Sort_direct(int n, double *array, int root, MPI_Comm comm,    
-                    double *out_tcomm, double *out_tcomp);
+/* MPI sort util */
+int MPI_Exchange(int n, double * array, int rank1, int rank2, MPI_Comm comm, double *out_tcomm, double *out_tcomp);
+int MPI_Is_sorted(int n, double *array, int *result, int root, MPI_Comm comm);
 
-int MPI_Sort_bucket(int n, double *array, int root, MPI_Comm comm,
-                    double *out_tcomm, double *out_tcomp);
+/* MPI sorts */
+int MPI_Sort_direct  (int n, double *array, int root, MPI_Comm comm, double *out_tcomm, double *out_tcomp);
+int MPI_Sort_bucket  (int n, double *array, int root, MPI_Comm comm, double *out_tcomm, double *out_tcomp);
+int MPI_Sort_odd_even(int n, double *array, int root, MPI_Comm comm, double *out_tcomm, double *out_tcomp);
+int MPI_Sort_shell   (int n, double *array, int root, MPI_Comm comm, double *out_tcomm, double *out_tcomp);
+int MPI_Sort_bitonic (int n, double *array, int root, MPI_Comm comm, double *out_tcomm, double *out_tcomp);
 
-int MPI_Sort_odd_even(int n, double *array, int root, MPI_Comm comm,
-                      double *out_tcomm, double *out_tcomp);
-
-int MPI_Sort_shell(int n, double *array, int root, MPI_Comm comm,
-                   double *out_tcomm, double *out_tcomp);
-
-int MPI_Sort_bitonic(int n, double *array, int root, MPI_Comm comm,
-                     double *out_tcomm, double *out_tcomp);
-
-
-int MPI_Exchange(int n, double * array, int rank1, int rank2, MPI_Comm comm,
-                 double *out_tcomm, double *out_tcomp);
-
-int MPI_Is_sorted(int n, double *array, int *result,
-                  int root, MPI_Comm comm);
 
 typedef enum sort_kind_e {
     SORT_DIRECT,
@@ -110,8 +100,10 @@ int main(int argc, char *argv[])
 {
 	int rank, size;
     int ret = MPI_SUCCESS;
-	int n = 100000;
+	int n = 10000000;
 	double*array;
+    double tcomm, tcomp;
+    double overall_time;
 
     if (argc < 2) {
         LOG("not enough arguments");
@@ -142,20 +134,19 @@ int main(int argc, char *argv[])
 	   }
 	}
 
-    double tcomm, tcomp;
+    overall_time = MPI_Wtime();
     ret = MPI_Sort_funcs[sort_kind](n, array, 0, MPI_COMM_WORLD, &tcomm, &tcomp); 
-    if (ret != MPI_SUCCESS) {
-        LOG("MPI failure: %d", ret);
-        goto out;
-    }
-    
+    overall_time = MPI_Wtime() - overall_time;
+    if (ret != MPI_SUCCESS) goto out;
+
     if (rank == 0) {
         LOG("[%s | %d] Comm Time: %lf Comp Time: %lf Total: %lf",
             sort_kind_to_str(sort_kind),
-            size, tcomm, tcomp, tcomm + tcomp);
+            size, tcomm, tcomp, overall_time);
     }
 
 out:
+    if (ret != MPI_SUCCESS) LOG("MPI failure: %d", ret);
     if (array) free(array);
 	MPI_Finalize();
 }
@@ -199,16 +190,6 @@ merge_sort(int n, double * a)
     return;
 }
 
-void
-bubble_sort(int n, double * a)
-{
-    for(int i=0;i<n-1;i++) {
-        for(int j=0;j<n-1;j++) {
-            if(a[j]>a[j+1])swap(a+j, a+j+1);
-        }
-    }
-}
-
 // swap two doubles
 void
 swap (double * a, double * b)
@@ -250,7 +231,7 @@ MPI_Sort_direct(int n,
 
     // sequential sort local_array
     time = MPI_Wtime();
-    bubble_sort(n/size, local_array);
+    merge_sort(n/size, local_array);
     time = MPI_Wtime() - time;
     tcomp += time;
 
@@ -603,6 +584,7 @@ MPI_Sort_bitonic(int n,
 {
     int rank, size;
     int ret = MPI_SUCCESS;
+    double *local_arr = NULL;
     double overall_tcomm, overall_tcomp;
     double tcomm = 0.0f;
     double tcomp = 0.0f;
@@ -620,7 +602,7 @@ MPI_Sort_bitonic(int n,
         goto out;
     }
 
-    double *local_arr = (double *)calloc(n/size, sizeof(*local_arr));
+    local_arr = (double *)calloc(n/size, sizeof(*local_arr));
     if (!local_arr) {
         ret = MPI_ERR_NO_MEM;
         goto out;
@@ -740,7 +722,6 @@ int MPI_Exchange(int      n,
     int rank, size, i, tag1 = 0, tag2 = 1;
     int ret = MPI_SUCCESS; 
     double * c;
-    double overall_tcomm, overall_tcomp;
     double tcomm = 0.0f;
     double tcomp = 0.0f;
     double time  = 0.0f;
