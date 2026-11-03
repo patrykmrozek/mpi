@@ -21,7 +21,6 @@ int MPI_Sort_odd_even(int n, double *array, int root, MPI_Comm comm, double *out
 int MPI_Sort_shell   (int n, double *array, int root, MPI_Comm comm, double *out_tcomm, double *out_tcomp);
 int MPI_Sort_bitonic (int n, double *array, int root, MPI_Comm comm, double *out_tcomm, double *out_tcomp);
 
-
 typedef enum sort_kind_e {
     SORT_DIRECT,
     SORT_BUCKET,
@@ -35,11 +34,11 @@ static inline const char*
 sort_kind_to_str(sort_kind_t kind)
 {
     switch(kind) {
-        case SORT_DIRECT:   return "DIRECT SORT";
-        case SORT_BUCKET:   return "BUCKET SORT";
-        case SORT_ODD_EVEN: return "ODD_EVEN SORT";
-        case SORT_SHELL:    return "SHELL SORT";
-        case SORT_BITONIC:  return "BITONIC SORT";
+        case SORT_DIRECT:   return "DIRECT";
+        case SORT_BUCKET:   return "BUCKET";
+        case SORT_ODD_EVEN: return "ODD_EVEN";
+        case SORT_SHELL:    return "SHELL";
+        case SORT_BITONIC:  return "BITONIC";
         default:            return "UNKNOWN";
     }
 }
@@ -94,7 +93,9 @@ logv(const char *str, ...)
 
 #endif //DEBUG_LOG
 
-#define RAND_LIMIT 10.0f
+#ifndef ARR_LIMIT
+    #define ARR_LIMIT 10.0f
+#endif //ARR_LIMIT
 
 int main(int argc, char *argv[])
 {
@@ -107,6 +108,7 @@ int main(int argc, char *argv[])
 
     if (argc < 2) {
         LOG("not enough arguments");
+        LOG("need an index between 0 and %d", _SORT_COUNT-1);
         return 1;
     }
 
@@ -130,7 +132,7 @@ int main(int argc, char *argv[])
     if (rank == 0) {
         srand(((unsigned)time(NULL)+rank));
         for (int i = 0; i < n; i++) {
-            array[i]=((double)rand()/RAND_MAX) * RAND_LIMIT;
+            array[i]=((double)rand()/RAND_MAX) * ARR_LIMIT;
         }
     }
 
@@ -140,7 +142,7 @@ int main(int argc, char *argv[])
     if (ret != MPI_SUCCESS) goto out;
 
     if (rank == 0) {
-        LOG("[%s | %d] Comm Time: %lf Comp Time: %lf Total: %lf",
+        LOG("[%s | %d] Comm: %lf Comp: %lf Total: %lf",
             sort_kind_to_str(sort_kind),
             size, tcomm, tcomp, overall_time);
     }
@@ -222,18 +224,15 @@ MPI_Sort_direct(int n,
         goto out;
     }
     
-    // scatter array to local_array with double elements
     time = MPI_Wtime();
     ret = MPI_Scatter(array, n/size, MPI_DOUBLE, local_array, n/size, MPI_DOUBLE, root, comm);
     tcomm += MPI_Wtime() - time;
     if (ret != MPI_SUCCESS) goto out;
 
-    // sequential sort local_array
     time = MPI_Wtime();
     merge_sort(n/size, local_array);
     tcomp += MPI_Wtime() - time;
 
-    // gather local_array to array with double elements
     time = MPI_Wtime();
     ret = MPI_Gather(local_array, n/size, MPI_DOUBLE, array, n/size, MPI_DOUBLE, root, comm);
     tcomm += MPI_Wtime() - time;
@@ -241,7 +240,6 @@ MPI_Sort_direct(int n,
 
     if(rank == root) {
         time = MPI_Wtime();
-        // merge the size chunks of array
         for(int i=1;i<size;i++) {
             double *tmp_array = merge_array(n/size*i, array, n/size, array+n/size*i);
             for(int j=0;j<(i+1)*n/size;j++)array[j] = tmp_array[j];
@@ -264,7 +262,7 @@ out:
     return ret;
 }
 
-#define MPI_SORT_BUCKET_MAX RAND_LIMIT
+#define MPI_SORT_BUCKET_MAX ARR_LIMIT
 
 int
 MPI_Sort_bucket(int n,
@@ -391,7 +389,8 @@ MPI_Sort_odd_even(int n,
     merge_sort(n/size, local_arr);
     tcomp += MPI_Wtime() - time;
 
-    for (int step = 0; step < size; step++) {
+    int step;
+    for (step = 0; step < size; step++) {
         if ((step + rank) % 2 == 0) {
             if (rank + 1 < size) {
                 ret = MPI_Exchange(n/size, local_arr, rank, rank+1, comm, &tcomm, &tcomp);
@@ -412,7 +411,7 @@ MPI_Sort_odd_even(int n,
         if (ret != MPI_SUCCESS) goto out;
 
         if (is_sorted) {
-            DEBUG("number of steps: %d", step);
+            DEBUG("number of steps: %d", step + 1);
             break;
         }
     }
@@ -438,12 +437,12 @@ out:
 }
 
 int
-MPI_Sort_shell(int n,
-               double *array,
-               int root,
+MPI_Sort_shell(int      n,
+               double  *array,
+               int      root,
                MPI_Comm comm,
-               double *out_tcomm,
-               double *out_tcomp)
+               double  *out_tcomm,
+               double  *out_tcomp)
 {
     int rank, size;
     int ret = MPI_SUCCESS;
@@ -472,22 +471,26 @@ MPI_Sort_shell(int n,
 
     //shell
     int left = 0, right = size-1;
+    int shell_steps = 0;
     while (left < right) {
         int partner = (right - rank) + left;
         int mid     = (right + left) / 2;
 
         if (rank < partner) {
-            MPI_Exchange(n/size, local_arr, rank, partner, comm, &tcomm, &tcomp);
+            ret = MPI_Exchange(n/size, local_arr, rank, partner, comm, &tcomm, &tcomp);
         } else if (rank > partner){
-            MPI_Exchange(n/size, local_arr, partner, rank, comm, &tcomm, &tcomp);
+            ret = MPI_Exchange(n/size, local_arr, partner, rank, comm, &tcomm, &tcomp);
         }
+        if (ret != MPI_SUCCESS) goto out;
         
         if (rank <= mid) {
             right = mid;
         } else {
             left = mid + 1;
         }
+        shell_steps++;
     }
+    DEBUG("number of shell steps; %d", shell_steps);
 
     int is_sorted;
     time = MPI_Wtime();
@@ -504,11 +507,12 @@ MPI_Sort_shell(int n,
     for (int step = 0; step < size; step++) {
         if ((step + rank) % 2 == 0) {
             if (rank + 1 < size)
-                MPI_Exchange(n/size, local_arr, rank, rank+1, comm, &tcomm, &tcomp);
+                ret = MPI_Exchange(n/size, local_arr, rank, rank+1, comm, &tcomm, &tcomp);
         } else {
             if (rank > 0)
-                MPI_Exchange(n/size, local_arr, rank-1, rank, comm, &tcomm, &tcomp);
+                ret = MPI_Exchange(n/size, local_arr, rank-1, rank, comm, &tcomm, &tcomp);
         }
+        if (ret != MPI_SUCCESS) goto out;
         MPI_Barrier(comm);
 
         time = MPI_Wtime();
@@ -517,7 +521,7 @@ MPI_Sort_shell(int n,
         if (ret != MPI_SUCCESS) goto out;
 
         if (is_sorted) {
-            DEBUG("number of steps: %d", step);
+            DEBUG("number of steps: %d", step+1);
             break;
         }
     }
@@ -606,13 +610,10 @@ MPI_Sort_bitonic(int n,
 
     int dim = get_dim(size-1);
     for (int level = 1; level <= dim; level++) {
-        int dir = DIR_ASC;
-        int bit = BIT_AT(rank, level);
+        int dir = BIT_AT(rank, level);
         for (int i = level; i > 0; i--) {
-            dir = bit;
             int pair = rank^(1<<(i - 1));
 
-            DEBUG_RANK(rank, "BIT: %d - ", bit);
             DEBUG_RANK(rank, "RANK: %d, PAIR: %d, LEVEL: %d, DIRECTION: %s",
                     rank, pair, level, (dir == DIR_ASC ? "ASC" : "DESC"));
 

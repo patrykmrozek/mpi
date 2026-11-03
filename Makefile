@@ -1,6 +1,7 @@
 .SILENT:
 
 CC = mpicc
+RUN = mpirun
 CFLAGS = -O3 -Wall
 OUT = mpisort
 
@@ -16,7 +17,7 @@ clean:
 run: $(OUT)
 	for k in 0 1 2 3 4; do \
 		for p in 1 2 4 8; do \
-			mpirun -np $$p $(OUT) $$k; \
+			$(RUN) -np $$p $(OUT) $$k; \
 		done; \
 		echo ""; \
 	done;
